@@ -12,17 +12,22 @@ Currently only a handful of buildings are available in OpenStreetMap for Bend. W
 
 [x] Acquire city data
 
-[ ] Create import [wiki page](http://wiki.openstreetmap.org/wiki/Import/Plan_Outline) 
+[ ] Create import [wiki page](http://wiki.openstreetmap.org/wiki/Import/Plan_Outline)
+ - The wiki page also needs to be maintained throughout the project
 
 [ ] Determine attributes to be imported
 
-[ ] Acquire any additional data necessary
+[ ] Acquire any additional data needed
 
 [ ] Process data
 
 [ ] Get "buy in" from OSM community
 
-[ ] Prepare import [OSM wiki page on imports](http://wiki.openstreetmap.org/wiki/Import/Guidelines)
+[ ] Prepare import: [OSM wiki page on imports](http://wiki.openstreetmap.org/wiki/Import/Guidelines)
+
+[ ] Decide on how to divide import tasks
+
+[ ] Execute import
 
 ## Additional info
 
