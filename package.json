@@ -1,0 +1,22 @@
+{
+  "name": "bend_buildings",
+  "version": "1.0.0",
+  "description": "This repo acts as a workspace for doing a bulk import of the 2004 building footprints from the City of Bend. Inspired in part by the [excellent job done by the Los Angeles maptime folks](https://github.com/osmlab/labuildings).",
+  "main": "download_lidar_tiles_test.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MaptimeBend/bend_buildings.git"
+  },
+  "author": "Andy Zeigert",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MaptimeBend/bend_buildings/issues"
+  },
+  "homepage": "https://github.com/MaptimeBend/bend_buildings",
+  "dependencies": {
+    "lodash": "^4.16.2"
+  }
+}
