@@ -12,7 +12,7 @@ Currently only a handful of buildings are available in OpenStreetMap for Bend. W
 
 [x] Acquire city data
 
-[ ] Create import [wiki page](http://wiki.openstreetmap.org/wiki/Import/Plan_Outline)
+[x] Create import [wiki page](https://wiki.openstreetmap.org/wiki/Bend_building_import)
  - The wiki page also needs to be maintained throughout the project
 
 [ ] Determine attributes to be imported (discuss in [this issue](https://github.com/MaptimeBend/bend_buildings/issues/1))
