@@ -21,15 +21,13 @@ var map = new mapboxgl.Map({
     container: 'map',
     style: 'mapbox://styles/mapbox/streets-v9',
     center: [-121.3, 44.05],
-    zoom: 15.99,
+    zoom: 14,
     pitch: 40,
     bearing: 20
 });
 
 map.on('load', function() {
 
-    // Geojson Data source used in vector tiles, documented at
-    // https://gist.github.com/ryanbaumann/a7d970386ce59d11c16278b90dde094d
     map.addSource("buildings", {
         'type': 'geojson',
         'data': 'buildings_sample.geojson'
@@ -49,12 +47,6 @@ map.on('load', function() {
                 'type': 'identity'
             },
             'fill-extrude-base': 0,
-			// {
-                // Get fill-extrude-base from the source 'base_height' property.
-                // 'property': 'gheight',
-                // 'type': 'identity'
-            // },
-            // Make extrusions slightly opaque for see through indoor walls.
             'fill-opacity': 0.5
         }
     });
