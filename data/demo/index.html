@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title></title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+    <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v0.26.0/mapbox-gl.js'></script>
+    <link href='https://api.tiles.mapbox.com/mapbox-gl-js/v0.26.0/mapbox-gl.css' rel='stylesheet' />
+    <style>
+        body { margin:0; padding:0; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+    </style>
+</head>
+<body>
+
+<div id='map'>
+</div>
+<script>
+mapboxgl.accessToken = 'pk.eyJ1IjoiYWp6ZWlnZXJ0IiwiYSI6IldLdVhKN1UifQ.43CCALwNLBzVybtPFvcaJQ';
+var map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/streets-v9',
+    center: [-121.3, 44.05],
+    zoom: 15.99,
+    pitch: 40,
+    bearing: 20
+});
+
+map.on('load', function() {
+
+    // Geojson Data source used in vector tiles, documented at
+    // https://gist.github.com/ryanbaumann/a7d970386ce59d11c16278b90dde094d
+    map.addSource("buildings", {
+        'type': 'geojson',
+        'data': 'buildings_sample.geojson'
+    });
+
+    map.addLayer({
+        'id': 'buildings',
+        'type': 'fill',
+        'source': 'buildings',
+        'paint': {
+            // See the Mapbox Style Spec for details on property functions
+            // https://www.mapbox.com/mapbox-gl-style-spec/#types-function
+            'fill-color': '#666',
+            'fill-extrude-height': {
+                // Get fill-extrude-height from the source 'height' property.
+                'property': 'buildheigh',
+                'type': 'identity'
+            },
+            'fill-extrude-base': 0,
+			// {
+                // Get fill-extrude-base from the source 'base_height' property.
+                // 'property': 'gheight',
+                // 'type': 'identity'
+            // },
+            // Make extrusions slightly opaque for see through indoor walls.
+            'fill-opacity': 0.5
+        }
+    });
+
+	map.addControl(new mapboxgl.NavigationControl({position: 'top-left'}));
+
+});
+</script>
+
+</body>
+</html>
