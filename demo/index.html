@@ -34,7 +34,7 @@ map.on('load', function() {
 
     map.addSource("buildings", {
         'type': 'geojson',
-        'data': 'buildings_sample.geojson'
+        'data': 'buildings.geojson'
     });
 
     map.addLayer({
@@ -47,7 +47,7 @@ map.on('load', function() {
             'fill-color': '#666',
             'fill-extrude-height': {
                 // Get fill-extrude-height from the source 'buildheigh' property.
-                'property': 'buildheigh',
+                'property': 'height',
                 'type': 'identity'
             },
             'fill-extrude-base': 0,

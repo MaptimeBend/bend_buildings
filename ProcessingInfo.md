@@ -6,13 +6,17 @@ Clone this repo. You'll find `README.md`, a `/data` directory, the `license.txt`
 
 ## Requirements:
 
-- WGET
-- GDAL
-- PDAL (I used the [Docker container](http://www.pdal.io/quickstart.html), which requires [Docker](https://www.docker.com/))
+- WGET `brew install wget`
+- GDAL `brew install gdal`
+- liblas `brew install liblas --with-laszip`
+- points2grid `brew install points2grid`
+<!-- - ~StarSpan~ -->
+- Rasterio `pip install rasterio`
+- Rasterstats `pip install rasterstats`
 
 I'll go into each of the above as they come up.
 
-I used macOS when writing this tutorial, but most of the instructions should work from any command line.
+I used macOS when writing this tutorial, but most of the instructions should work from any command line. Installing using homebrew won't, though.
 
 ## Existing dataset
 
@@ -75,10 +79,16 @@ The fields included in this shapefile suggest that this dateset was originally e
 
 _Before we start creating a bunch of temp data, create a new folder called `data_processing` in the main repo and add it to [your `.gitignore` file](https://help.github.com/articles/ignoring-files/). We'll be filling this folder with lots of (sometimes enormous) scratch files, and we don't really want to track them in github._
 
+Make our processing folder and enter it:
+
+```
+mkdir data_processing
+```
+
 Now lets make that new shapefile:
 
 ```
-ogr2ogr data_processing/building_footprints.shp data/building_footprints2004_intlfeet.shp -sql "SELECT CAST(elevation AS numeric(10,3)) AS orig_el_ft FROM building_footprints2004_intlfeet" -progress -overwrite
+ogr2ogr data_processing/building_footprints.shp data/building_footprints2004_intlfeet.shp -sql "SELECT FID AS id, CAST(elevation AS numeric(10,3)) AS orig_el_ft FROM building_footprints2004_intlfeet" -progress -overwrite
 ```
 
 Here's what's happening in that command (I won't break down all of them, just this one since it's kind of a beast):
@@ -148,6 +158,275 @@ URL: String (117.0)
 
 1021 features! That's a lot of LIDAR data, and we only need a few of them. And look, there's a URL field that points directly at the `.laz` files we need. What we need to do is figure out which of those `.laz` files we need, and then download and process each one.
 
-To do that, we'll start by using `ogr2ogr` to clip the LIDAR `tile_index.shp` file using the `building_footprints.shp` file. But first, we'll need to make sure they're in the same coordinate system.
+To do that, we'll start by using `ogr2ogr` to clip the LIDAR `tile_index.shp` file using the `building_footprints.shp` layer extents. But first, we'll need to make sure they're in the same coordinate system. We'll use `EPSG:4326`.
 
-_tk_
+Convert the buildings:
+
+```
+ogr2ogr data_processing/buildings_4326.shp -t_srs "EPSG:4326" data_processing/building_footprints.shp
+```
+
+Convert the tile index:
+
+```
+ogr2ogr data_processing/lidar_index_4326.shp -t_srs "EPSG:4326" data_processing/2010_OR_DOGAMI_Newberry_index.shp
+```
+
+Now that both are in the same coordinate system, we can properly clip. Let's grab the extent of the buildings layer:
+
+```
+ogrinfo data_processing/buildings_4326.shp buildings_4326 | grep Extent
+```
+
+Thus revealing: `Extent: (-121.378524, 43.993228) - (-121.192770, 44.123710)`
+
+Now we can clip the tile index shapefile by that bounding box:
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/lidar_index_subset.shp data_processing/lidar_index_4326.shp -clipsrc -121.192770 44.123710 -121.378524 43.993228
+```
+
+That gives us a shapefile that is essentially a list of the LIDAR data we'll need, with URLs to their locations. _An alternative to using a bounding box would be to use the buildings layer itself as a clipping source, or an sql query to spatially select the overlapping features, but a bounding box is simpler in this case._
+
+Finally, let's convert that into a `.csv` file that Wget can iterate over.
+
+```
+ogr2ogr -f "CSV" data_processing/lidar_urls.csv data_processing/lidar_index_subset.shp -sql "SELECT url FROM lidar_index_subset"
+```
+
+Let's confirm:
+
+```
+vim data_processing/lidar_urls.csv
+```
+
+[Vim](http://vimsheet.com/) is a command-line text editor. It's a pain to learn but sometimes it's nice to be able to do basic reading and editing of text and code files without opening another application.
+
+It looks like there are some extraneous double quotation marks in the file that will hose the wget command in the next step. Let's use Vim to get rid of them by globally finding and replacing them with nothing. In vim, type `:%s/"//g` and press Enter. Vim should inform you that a bunch of substitutions have been made.
+
+Once you're satisfied that our file is correct, you can close Vim by typing `:q` and then pressing Enter.
+
+### Download LIDAR files
+
+_**Note:** This step is going to download just under 5GB of data to your machine. Make sure you have a good internet connection and enough disk space before starting._
+
+This should be as simple as:
+
+```
+wget -P data_processing/raw_lidar -i data_processing/lidar_urls.csv
+```
+
+Wget is very helpful in that it informs you what is going on with each download. This step acquires about 125 rather large files, so you can see why we don't include them in the Github repo to begin with.
+
+### Processing LIDAR
+
+For each LIDAR dataset, we'll:
+
+1. Read the LIDAR file (.laz)
+2. Filter out the points we're looking for
+3. Interpolate the filtered points and write to a raster file
+
+First, our tools:
+
+- liblas `brew install liblas --with-laszip` (this includes las2las)
+- points2grid `brew install points2grid`
+
+The tool we're going to use to create our raster files, points2grid, needs uncompressed LAS files for input. So we'll first decompress our LAZ file:
+
+```
+mkdir data_processing/temp
+las2las -i data_processing/raw_lidar/20100528_43121h2101.laz -o data_processing/temp/20100528_43121h2101.laz.las;
+```
+
+Next, we'll use points2grid to both filter out the last returns and create our raster files, which will be in ASC, or arc grid, format.
+
+The points2grid command uses the given resolution (in this case .00001 of a degree) to set the pixel size. <!-- Convert to UTM? --> Then it examines all lidar points that fall within each pixel and gives us rasters containing the minimum elevation value and the [inverse difference weighting (IDW)](http://help.arcgis.com/en/arcgisdesktop/10.0/help/index.html#//00310000002m000000) of all values. The command can also produce maximum, median, average and standard deviation interpolations, but we'll be creating minimum and IDW rasters for use in our calculations. IDW will give us a good, sharply-defined building outline and generally reliable height fields. Our minimum raster will be used for calculating the ground level around each building, since lidar returns should generally never be lower than the ground. :smile:
+
+
+```
+mkdir data_processing/rasters
+mkdir data_processing/rasters/idw
+mkdir data_processing/rasters/min
+
+points2grid -i data_processing/temp/20100528_43121h2101.laz.las --last_return_only --resolution .00001 --idw -o data_processing/rasters/idw/20100528_43121h2101.laz.las --output_format arc;
+
+points2grid -i data_processing/temp/20100528_43121h2101.laz.las --last_return_only --resolution .00001 --min -o data_processing/rasters/min/20100528_43121h2101.laz.las --output_format arc;
+
+```
+
+
+Additionally, we can remove our temp file with `rm data_processing/temp/20100528_43121h2101.laz.las`.
+
+Now, just repeat that 125 more times!
+
+Or, we can use a bash script to loop through all of the .laz files in our `raw_lidar` folder and complete each action:
+
+```
+for f in data_processing/raw_lidar/*.laz;
+	do
+		name=${f##*/}
+		las2las -i $f -o temp/${name}.las;
+	    points2grid -i data_processing/temp/${name}.las --last_return_only --resolution .00001 --idw -o data_processing/rasters/idw/${name} --output_format arc;
+	    points2grid -i data_processing/temp/${name}.las --last_return_only --resolution .00001 --min -o data_processing/rasters/min/${name} --output_format arc;
+		rm data_processing/temp/${name}.las
+done
+```
+
+Finally, let's merge all of our new rasters into a merged file.
+
+```
+rio merge data_processing/rasters/idw/*.asc data_processing/rasters/idw/idw_merged.asc
+rio merge data_processing/rasters/min/*.asc data_processing/rasters/min/min_merged.asc
+```
+
+We now have the raster info we need to perform all of our calculations.
+
+### Calculate building heights
+
+#### Create a buffer file
+
+First, reproject to a meter-based projection:
+
+```
+ogr2ogr data_processing/temp/buildings_meters.shp -t_srs "EPSG:26910" data_processing/buildings_4326.shp
+```
+
+Now create a 1m buffer:
+
+```
+ogr2ogr data_processing/temp/building1m.shp data_processing/temp/buildings_meters.shp buildings_meters -dialect sqlite -sql "SELECT ST_Buffer( geometry, 1 ), * FROM 'buildings_meters'"
+```
+
+And a 2m buffer:
+
+```
+ogr2ogr data_processing/temp/building2m.shp data_processing/temp/buildings_meters.shp buildings_meters -dialect sqlite -sql "SELECT ST_Buffer( geometry, 2 ), * FROM 'buildings_meters'"
+```
+
+And get the difference between the 2m buffer using the 1m buffer (this took a while on my machine):
+
+```
+ogr2ogr -f "GeoJSON" data_processing/building_buffer.geojson data_processing/temp/building2m.shp -dialect sqlite \
+-sql "SELECT ST_Difference(a.Geometry, b.Geometry) AS Geometry, a.id \
+FROM building2m a LEFT JOIN 'data_processing/temp/building1m.shp'.building1m b USING (id) WHERE a.Geometry != b.Geometry"
+```
+
+#### Calculate the zonal statistics for buffer and buildings
+
+Note that we output GeoJSON in the above step. The tool we're using for **zonal statistics**, RasterStats, requires GeoJSON as input.
+
+Now let's create a GeoJSON copy of the buildings layer:
+
+```
+ogr2ogr -f "GeoJSON" data_processing/buildings_4326.geojson data_processing/buildings_4326.shp
+```
+
+And reproject our buffer to EPSG:4326:
+
+```
+ogr2ogr -f "GeoJSON" data_processing/building_buffer_4326.geojson -t_srs "EPSG:4326" data_processing/building_buffer.geojson
+```
+
+Let's get the zonal stats of our buildings:
+
+```
+rio zonalstats -r data_processing/rasters/idw/idw_merged.asc --prefix "building_el_" --stats "max median" data_processing/buildings_4326.geojson > data_processing/building_elevation.geojson
+```
+
+And the zonal status of our buffer:
+
+```
+rio zonalstats -r data_processing/rasters/min/min_merged.asc --prefix "buffer_el_" --stats "min median" data_processing/building_buffer_4326.geojson > data_processing/buffer_elevation.geojson
+```
+
+#### Calculate building heights
+
+And now, finally, we create a new dataset with the difference between our building elevation and our buffer elevation:
+
+Start by creating a dataset with all of our statistical fields by joining our two geojson files based on their `id` field. This will be easiest if we convert them back to shapefiles and create an index on the `id` field:
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/building_el.shp data_processing/building_elevation.geojson -progress -overwrite
+ogr2ogr -f "ESRI Shapefile" data_processing/buffer_el.shp data_processing/buffer_elevation.geojson -progress
+
+ogrinfo data_processing/building_el.shp -sql "CREATE INDEX ON building_el USING id"
+ogrinfo data_processing/buffer_el.shp -sql "CREATE INDEX ON buffer_el USING id"
+```
+
+The converstion to shapefile will truncate our column names, and gdal should tell you:
+
+```
+Warning 6: Normalized/laundered field name: 'building_el_max' to 'building_e'
+Warning 6: Normalized/laundered field name: 'building_el_median' to 'building_1'
+
+...
+
+Warning 6: Normalized/laundered field name: 'buffer_el_min' to 'buffer_el_'
+Warning 6: Normalized/laundered field name: 'buffer_el_median' to 'buffer_e_1'
+```
+
+Let's just note that. We'll need to know which is which later.
+
+
+Then create the joined shapefile:
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/building_el_join.shp data_processing/building_el.shp -dialect sqlite -sql "SELECT * FROM building_el a LEFT JOIN 'data_processing/buffer_el.shp'.buffer_el b ON a.id = b.id" -overwrite -progress
+```
+
+Now for some math.
+
+First, lets add a field to contain our building height. We want it to be a floating point with two decimal points of precision. We'll call it `height`.
+
+```
+ogrinfo data_processing/building_el_join.shp -sql "ALTER TABLE building_el_join ADD COLUMN height numeric(6,2)"
+```
+
+Remember how we included the `orig_el_ft` field in our table? That's a height field for each building recorded in feet from the original dataset. Let's create another column that we can use to convert those values to meters and compare to our lidar-derived values.
+
+```
+ogrinfo data_processing/building_el_join.shp -sql "ALTER TABLE building_el_join ADD COLUMN orig_el_m numeric(7,3)"
+```
+
+Math time. The [OpenStreetMap wiki tells us](http://wiki.openstreetmap.org/wiki/Key:height) that the `height` tag should be the distance between the **maximum height** of the building and the **lowest point at the bottom** where the building meets the terrain. So we should be able to subtract our **building max** field from our **buffer min** field to get just about the most accurate lidar-derived building height possible, right? That would be true if there were no trees or other obstructions that stood over the top of a building. So instead of using the **max** value from our zonal stats, we'll use the **median**, which should give us a better representation of the actual elevation of each building. Additionally, our original height in meters should be the value in feet multiplied by 0.305. These commands will give you some warnings saying values weren't successfully written, but that's just due to have to cut off a bunch of decimal points from the original values.
+
+```
+ogrinfo data_processing/building_el_join.shp -dialect SQLite -sql "UPDATE building_el_join SET height = building_e - buffer_el_"
+
+ogrinfo data_processing/building_el_join.shp -dialect SQLite -sql "UPDATE building_el_join SET orig_el_m = orig_el_ft * 0.305"
+
+```
+
+We now have a shapefile with a height value for all 36K+ buildings in Bend. Now, it's not perfect. The building footprints were created in 2004 an the lidar was flown in 2010. Any difference between a building between those dates could result in funky data, which is why we'll be doing some quality assurance during our mapathon.
+
+Let's tear off a geojson file that we can stash in our demo folder for display on a webmap:
+
+```
+ogr2ogr -f "GeoJSON" demo/buildings.geojson data_processing/building_el_join.shp -sql "SELECT id AS id, height AS height FROM building_el_join" -progress -overwrite
+```
+
+And now let's fire up the demo page:
+
+```
+cd demo
+python -m SimpleHTTPServer 8000
+```
+
+Now open a browser and navigate to http://localhost:8000.
+
+<!--
+#### PDAL fail
+In PDAL, each of these operations is called a "stage". We'll be creating a single operation that will process each LAZ file into two DEMs: One bare earth model **Digital Terrain Model (DTM)** and one **Digital Surface Model (DSM)**, which contains everything on the surface, including buildings. These
+will give us much higher resolution DEMs than are available from DOGAMI, so when we later do our zonal statistics, we'll get more accurate information. We're making both a DTM and a DSM so that we can have both available when making visual comparisons in JOSM during our OSM import.
+
+First, you need to [get started with PDAL](http://www.pdal.io/quickstart.html#install-docker). Feel free to download and build PDAL from source, but I recommend using Docker, and the instructions here will assume you're using that.
+
+Let's take a look at our first file:
+
+_**Note:** In this command, the `-v` flag and the paths that follow are linking my local folder to a virtual folder within the Docker container called `data`. Your paths will be different. [Read here](http://www.pdal.io/quickstart.html#enable-docker-access-to-your-machine) for a quick intro to how this works._
+
+```
+docker run -v /Users/username/Github/bend_buildings:/data pdal/pdal:1.4 pdal info /data/data_processing/raw_lidar/20100528_43121h2101.laz
+```
+
+You should get back a summary of the contents of that file, including stats on all [dimensions](http://www.pdal.io/dimensions.html). -->
