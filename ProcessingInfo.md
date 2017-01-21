@@ -254,7 +254,6 @@ points2grid -i data_processing/temp/20100528_43121h2101.laz.las --last_return_on
 
 ```
 
-
 Additionally, we can remove our temp file with `rm data_processing/temp/20100528_43121h2101.laz.las`.
 
 Now, just repeat that 125 more times!
@@ -388,10 +387,10 @@ Remember how we included the `orig_el_ft` field in our table? That's a height fi
 ogrinfo data_processing/building_el_join.shp -sql "ALTER TABLE building_el_join ADD COLUMN orig_el_m numeric(7,3)"
 ```
 
-Math time. The [OpenStreetMap wiki tells us](http://wiki.openstreetmap.org/wiki/Key:height) that the `height` tag should be the distance between the **maximum height** of the building and the **lowest point at the bottom** where the building meets the terrain. So we should be able to subtract our **building max** field from our **buffer min** field to get just about the most accurate lidar-derived building height possible, right? That would be true if there were no trees or other obstructions that stood over the top of a building. So instead of using the **max** value from our zonal stats, we'll use the **median**, which should give us a better representation of the actual elevation of each building. Additionally, our original height in meters should be the value in feet multiplied by 0.305. These commands will give you some warnings saying values weren't successfully written, but that's just due to have to cut off a bunch of decimal points from the original values.
+Math time. The [OpenStreetMap wiki tells us](http://wiki.openstreetmap.org/wiki/Key:height) that the `height` tag should be the distance between the **maximum height** of the building and the **lowest point at the bottom** where the building meets the terrain. So we should be able to subtract our **building max** field from our **buffer min** field to get just about the most accurate lidar-derived building height possible, right? That would be true if there were no trees or other obstructions that stood over the top of a building. So instead of using the **max** value from our zonal stats, we'll use the **median**, which should give us a better representation of the actual top of each building. Additionally, our original height in meters should be the value in feet multiplied by 0.305. These commands will give you some warnings saying values weren't successfully written, but that's just due to have to cut off a bunch of decimal points from the original values.
 
 ```
-ogrinfo data_processing/building_el_join.shp -dialect SQLite -sql "UPDATE building_el_join SET height = building_e - buffer_el_"
+ogrinfo data_processing/building_el_join.shp -dialect SQLite -sql "UPDATE building_el_join SET height = building_1 - buffer_el_"
 
 ogrinfo data_processing/building_el_join.shp -dialect SQLite -sql "UPDATE building_el_join SET orig_el_m = orig_el_ft * 0.305"
 
@@ -399,10 +398,10 @@ ogrinfo data_processing/building_el_join.shp -dialect SQLite -sql "UPDATE buildi
 
 We now have a shapefile with a height value for all 36K+ buildings in Bend. Now, it's not perfect. The building footprints were created in 2004 an the lidar was flown in 2010. Any difference between a building between those dates could result in funky data, which is why we'll be doing some quality assurance during our mapathon.
 
-Let's tear off a geojson file that we can stash in our demo folder for display on a webmap:
+Let's tear off a geojson file that we can stash in our demo folder for display on a web map: (Note: You'll need to delete the original demo geojson before running this command)
 
 ```
-ogr2ogr -f "GeoJSON" demo/buildings.geojson data_processing/building_el_join.shp -sql "SELECT id AS id, height AS height FROM building_el_join" -progress -overwrite
+ogr2ogr -f "GeoJSON" demo/buildings.geojson data_processing/building_el_join.shp -sql "SELECT id AS id, height AS height FROM building_el_join" -progress
 ```
 
 And now let's fire up the demo page:
