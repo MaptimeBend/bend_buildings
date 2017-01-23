@@ -103,7 +103,7 @@ Now we have a fresh shapefile with just the original elevation in feet for each 
 
 ## Adding building heights
 
-Bend has pretty complete LIDAR coverage from 2011 via [DOGAMI](http://www.oregongeology.org/sub/lidardataviewer/index.htm). LIDAR is a way to collect a dense point cloud file that can be used to extract meaningful information about landscapes at a very high resolution. We'll use the raw LIDAR files (.las) to create high-resolution [DSM and DTM](https://en.wikipedia.org/wiki/Digital_elevation_model) images that we can use to extract elevations and building heights. We'll then create tiled versions of those to use during OSM import sessions as a heads-up comparison tool.
+Bend has pretty complete LIDAR coverage from 2010 via [DOGAMI](http://www.oregongeology.org/sub/lidardataviewer/index.htm). LIDAR is a way to collect a dense point cloud file that can be used to extract meaningful information about landscapes at a very high resolution. We'll use the raw LIDAR files (.las) to create high-resolution [DSM and DTM](https://en.wikipedia.org/wiki/Digital_elevation_model) images that we can use to extract elevations and building heights. We'll then create tiled versions of those to use during OSM import sessions as a heads-up comparison tool.
 
 ### Determine required LIDAR dataset
 
@@ -156,7 +156,7 @@ URL: String (117.0)
 
 ```
 
-1021 features! That's a lot of LIDAR data, and we only need a few of them. And look, there's a URL field that points directly at the `.laz` files we need. What we need to do is figure out which of those `.laz` files we need, and then download and process each one.
+1021 features! That's a lot of LIDAR data, and we only need some of them. And look, there's a `URL` field that points directly at the `.laz` files we need. What we need to do is figure out which of those `.laz` files we need, and then download and process each one.
 
 To do that, we'll start by using `ogr2ogr` to clip the LIDAR `tile_index.shp` file using the `building_footprints.shp` layer extents. But first, we'll need to make sure they're in the same coordinate system. We'll use `EPSG:4326`.
 
@@ -206,9 +206,11 @@ It looks like there are some extraneous double quotation marks in the file that 
 
 Once you're satisfied that our file is correct, you can close Vim by typing `:q` and then pressing Enter.
 
+<!-- There's got to be a way with wget or gdal to skip this step -->
+
 ### Download LIDAR files
 
-_**Note:** This step is going to download just under 5GB of data to your machine. Make sure you have a good internet connection and enough disk space before starting._
+_**Note:** This step is going to download just under 5GB of data to your computer. Make sure you have a good internet connection and enough disk space before starting._
 
 This should be as simple as:
 
@@ -231,7 +233,7 @@ First, our tools:
 - liblas `brew install liblas --with-laszip` (this includes las2las)
 - points2grid `brew install points2grid`
 
-The tool we're going to use to create our raster files, points2grid, needs uncompressed LAS files for input. So we'll first decompress our LAZ file:
+The tool we're going to use to create our raster files, points2grid, needs uncompressed LAS files for input. So we'll first decompress our LAZ file into a temp folder:
 
 ```
 mkdir data_processing/temp
@@ -240,7 +242,7 @@ las2las -i data_processing/raw_lidar/20100528_43121h2101.laz -o data_processing/
 
 Next, we'll use points2grid to both filter out the last returns and create our raster files, which will be in ASC, or arc grid, format.
 
-The points2grid command uses the given resolution (in this case .00001 of a degree) to set the pixel size. <!-- Convert to UTM? --> Then it examines all lidar points that fall within each pixel and gives us rasters containing the minimum elevation value and the [inverse difference weighting (IDW)](http://help.arcgis.com/en/arcgisdesktop/10.0/help/index.html#//00310000002m000000) of all values. The command can also produce maximum, median, average and standard deviation interpolations, but we'll be creating minimum and IDW rasters for use in our calculations. IDW will give us a good, sharply-defined building outline and generally reliable height fields. Our minimum raster will be used for calculating the ground level around each building, since lidar returns should generally never be lower than the ground. :smile:
+The points2grid command uses the given resolution (in this case .00001 of a degree) to set the pixel size. <!-- Convert to UTM? --> Then it examines all lidar points that fall within each pixel and gives us a single interpolated value of all of the points. The command can produce maximum, minimum, median, average [inverse difference weighted (IDW)](http://help.arcgis.com/en/arcgisdesktop/10.0/help/index.html#//00310000002m000000) rasters. We'll be creating minimum and IDW rasters for use in our calculations. IDW will give us a good, sharply-defined building outline and generally reliable height fields. Our minimum raster will be used for calculating the ground level around each building, since lidar returns should generally never be lower than the ground. :smile:
 
 
 ```
@@ -271,7 +273,7 @@ for f in data_processing/raw_lidar/*.laz;
 done
 ```
 
-Finally, let's merge all of our new rasters into a merged file.
+Finally, let's convert our new rasters into merged files.
 
 ```
 rio merge data_processing/rasters/idw/*.asc data_processing/rasters/idw/idw_merged.asc
@@ -284,7 +286,7 @@ We now have the raster info we need to perform all of our calculations.
 
 #### Create a buffer file
 
-First, reproject to a meter-based projection:
+First, reproject our buildings to a meter-based projection (degrees are not great for buffering):
 
 ```
 ogr2ogr data_processing/temp/buildings_meters.shp -t_srs "EPSG:26910" data_processing/buildings_4326.shp
@@ -303,6 +305,8 @@ ogr2ogr data_processing/temp/building2m.shp data_processing/temp/buildings_meter
 ```
 
 And get the difference between the 2m buffer using the 1m buffer (this took a while on my machine):
+
+<!-- Adding a spatial index first might help? Haven't tried yet -->
 
 ```
 ogr2ogr -f "GeoJSON" data_processing/building_buffer.geojson data_processing/temp/building2m.shp -dialect sqlite \
@@ -412,6 +416,96 @@ python -m SimpleHTTPServer 8000
 ```
 
 Now open a browser and navigate to http://localhost:8000.
+
+
+## Building addresses
+
+[Deschutes County's Open Data Portal](http://data.deschutes.org/) offers an up-to-date dataset of [all taxlots](http://data.deschutes.org/datasets/28019431cced49849cb4b1793b075bf1_2) in Bend. The portal also offers an up-to-date [data file of addresses](http://data.deschutes.org/datasets/aea94004ae8c49e6a6dec394522677ad_1) for each taxlot.
+
+We'll download both files, join them based on taxlot ID, and then perform a spatial join to attach address information to buildings based on their taxlot. Fun!
+
+First the taxlots dataset:
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/taxlots.shp "http://data.deschutes.org/datasets/28019431cced49849cb4b1793b075bf1_2.geojson" OGRGeoJSON
+```
+
+Then the assessor info table: (This will not have a geometry field, but we'll want an index for our later join.)
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/addresses.dbf "http://data.deschutes.org/datasets/aea94004ae8c49e6a6dec394522677ad_1.geojson" OGRGeoJSON
+```
+
+Now let's go ahead and create indexes on the both datasets:
+
+```
+ogrinfo data_processing/taxlots.shp -sql "CREATE INDEX ON taxlots USING taxlot"
+ogrinfo data_processing/addresses.dbf -sql "CREATE INDEX ON addresses USING taxlot"
+```
+
+Now to join them (this one takes a while):
+
+<!-- Could reduce this dataset to only taxlots in Bend before? -->
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/taxlots_addresses_joined.shp data_processing/taxlots.shp -dialect sqlite -sql "SELECT * FROM taxlots a LEFT JOIN 'data_processing/addresses.dbf'.addresses b ON a.taxlot = b.taxlot" -overwrite -progress
+```
+
+Now let's add spatial indexes to our taxlots and buildings:
+
+```
+ogrinfo data_processing/taxlots_addresses_joined.shp -sql "CREATE SPATIAL INDEX ON taxlots_addresses_joined"
+ogrinfo data_processing/building_el_join.shp -sql "CREATE SPATIAL INDEX ON building_el_join"
+```
+
+Our joined taxlots shapefile has the following fields:
+
+```
+OBJECTID: Integer (10.0)
+TAXLOT: String (80.0)
+TOWNSHIP: String (80.0)
+RANGE: String (80.0)
+SECTION: String (80.0)
+QUARTER: String (80.0)
+SIXTEENTH: String (80.0)
+PARCEL: String (80.0)
+MAPSUP: String (80.0)
+MAPNUMBER: String (80.0)
+Shape_Leng: Real (24.15)
+Shape_Area: Real (24.15)
+Address: String (80.0)
+House_Numb: String (80.0)
+Direction: String (80.0)
+Street_Nam: String (80.0)
+Street_Typ: String (80.0)
+Unit_Numbe: String (80.0)
+City: String (80.0)
+State: String (80.0)
+Zip: String (80.0)
+Subdiv_Cod: String (80.0)
+Subdivisio: String (136.0)
+Block: String (80.0)
+Lot: String (80.0)
+MA: String (80.0)
+SA: String (80.0)
+Percent_Go: String (80.0)
+LegalLot: String (80.0)
+UGB: String (80.0)
+FirePatrol: String (80.0)
+NH: String (80.0)
+```
+
+We only need to join three fields to our buildings shapefile: `House_Numb`, `Street_Nam` and `Street_Typ`. <!-- Do we need unit number? -->
+
+And now the spatial join to attach those fields to all of our buildings using the [ST_Contains query](http://postgis.net/docs/manual-1.4/ST_Contains.html):
+
+<!-- Crap, did I make sure these were in the same coordinate system? Needs to be geographic. -->
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/buildings_height_addressed.shp data_processing/building_el_join.shp -dialect sqlite -sql "SELECT b.Geometry, b.id, t.House_Numb, t.Street_Nam, t.Street_Typ, b.height FROM building_el_join b, 'data_processing/taxlots_addresses_joined.shp'.taxlots_addresses_joined t WHERE ST_Contains(t.Geometry, b.Geometry)"
+```
+
+[ST_Contains docs](http://postgis.net/docs/manual-1.4/ST_Contains.html)
 
 <!--
 #### PDAL fail
