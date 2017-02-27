@@ -344,6 +344,8 @@ rio zonalstats -r data_processing/rasters/min/min_merged.asc --prefix "buffer_el
 
 #### Calculate building heights
 
+!!! REFACTOR ALL OF THIS INTO A POSTGIS THING !!!
+
 And now, finally, we create a new dataset with the difference between our building elevation and our buffer elevation:
 
 Start by creating a dataset with all of our statistical fields by joining our two geojson files based on their `id` field. This will be easiest if we convert them back to shapefiles and create an index on the `id` field:
@@ -501,9 +503,50 @@ And now the spatial join to attach those fields to all of our buildings using th
 
 <!-- Crap, did I make sure these were in the same coordinate system? Needs to be geographic. -->
 
+!!! NEED TO SET UP AND LOAD POSTGIS HERE MAYBE? !!!
+
 ```
 ogr2ogr -f "ESRI Shapefile" data_processing/buildings_height_addressed.shp data_processing/building_el_join.shp -dialect sqlite -sql "SELECT b.Geometry, b.id, t.House_Numb, t.Street_Nam, t.Street_Typ, b.height FROM building_el_join b, 'data_processing/taxlots_addresses_joined.shp'.taxlots_addresses_joined t WHERE ST_Contains(t.Geometry, b.Geometry)"
 ```
+Create centroids from building polygons with just the fields we need:
+
+```
+CREATE TABLE buildings_centroids AS
+	SELECT b.id AS id,
+		b.height AS height,
+		ST_Centroid(b.geom) AS centroid
+	FROM building_el_join b
+```
+
+Join the address to the centroids IF the centroid falls WITHIN a taxlot:
+
+```
+CREATE TABLE buildings_centroids_join AS
+	SELECT b.id AS id,
+        b.height AS height,
+        t.house_numb AS housenumber,
+        t.street_nam AS street,
+        t.city AS city,
+        t.zip AS postcode
+    FROM buildings_centroids b, taxlots_addresses_joined_4326 t
+    WHERE ST_Within(b.centroid, t.geom)
+```
+
+Now join the address from the centroids back to the building polygon based on the id field:
+
+```
+CREATE TABLE buildings_final AS
+	SELECT b.id AS id,
+		b.height AS height,
+		b.housenumber AS housenumber,
+		b.street AS street,
+		b.city AS city,
+		b.postcode AS postcode,
+		p.geom AS geom
+	FROM buildings_centroids_join b, building_el_join p
+	WHERE b.id = p.id
+```
+
 
 [ST_Contains docs](http://postgis.net/docs/manual-1.4/ST_Contains.html)
 
