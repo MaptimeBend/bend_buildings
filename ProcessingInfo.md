@@ -547,8 +547,12 @@ CREATE TABLE buildings_final AS
 	WHERE b.id = p.id
 ```
 
+Export the buildings as a geojson file for our demo map:
 
-[ST_Contains docs](http://postgis.net/docs/manual-1.4/ST_Contains.html)
+```
+ogr2ogr -f "GeoJSON" demo/buildings.geojson PG:"host=localhost dbname=bend_buildings" -sql "SELECT * from buildings_final"
+```
+
 
 <!--
 #### PDAL fail
