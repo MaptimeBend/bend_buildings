@@ -19,7 +19,7 @@ Currently only a handful of buildings are available in OpenStreetMap for Bend. W
 
 [x] Acquire any additional data needed
 
-[ ] Process data
+[x] Process data
 
 [ ] Get "buy in" from OSM community
 
