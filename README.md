@@ -2,6 +2,8 @@
 
 This repo acts as a workspace for doing a bulk import of the 2004 building footprints from the City of Bend. Inspired in part by the [excellent job done by the Los Angeles maptime folks](https://github.com/osmlab/labuildings).
 
+**UPDATE:** There's a demo map that shows our dataset now available: http://maptimebend.github.io/bend_buildings/demo/ (Warning: Large geojson file, give it a sec.)
+
 ![](buildings.png)
 
 ## Purpose
