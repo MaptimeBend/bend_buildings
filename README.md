@@ -42,9 +42,7 @@ Required packages:
 - [rasterstats](https://github.com/perrygeo/python-rasterstats)
 - [points2grid](https://github.com/CRREL/points2grid/)
 
-With the exception of points2grid, these packages can all be installed using python `pip`.
-
-However, this tutorial recommends using a python virtual environment to keep everything tidy. The easiest way to do that is to install [anaconda](https://www.continuum.io/downloads) or [miniconda](https://conda.io/miniconda.html). These scripts were created using miniconda on MacOS. Commands could vary slightly for other systems, see the [documentation](https://conda.io/docs/).
+This tutorial recommends using a python virtual environment to keep everything tidy. The easiest way to do that is to install [anaconda](https://www.continuum.io/downloads) or [miniconda](https://conda.io/miniconda.html). These scripts were created using miniconda on MacOS. Commands could vary slightly for other systems, see the [documentation](https://conda.io/docs/).
 
 Once either of those is installed, you should have access to the `conda` command line tool.
 
@@ -102,6 +100,6 @@ sh process_building_heights.sh
 
 In addition, this script will export a GeoJSON file to the `demo` folder. To view a demo of the data, `cd` to demo and start a web server.
 
-## Additional info
+## Additional resources
 
 Path to DOGAMI LiDAR:  ftp://coast.noaa.gov/pub/DigitalCoast/lidar1_z/geoid12a/data/1452/ or https://coast.noaa.gov/htdata/lidar1_z/geoid12a/data/1452/
