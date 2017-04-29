@@ -6,9 +6,13 @@ Clone this repo. You'll find `README.md`, a `/data` directory, the `license.txt`
 
 ## Requirements:
 
+I like using [Homebrew](http://brew.sh/) to manage packages on macOS. [NuGet](https://www.nuget.org/) is a nice Windows equivalent, but you'll have to figure out equivalent commands. If you want to build stuff from source, go right ahead, but this tutorial won't cover that.
+
 - WGET `brew install wget`
 - GDAL `brew install gdal`
 - liblas `brew install liblas --with-laszip`
+- postgres `brew install postgresql`
+- postgis `brew install postgis`
 - points2grid `brew install points2grid`
 <!-- - ~StarSpan~ -->
 - Rasterio `pip install rasterio`
@@ -16,15 +20,37 @@ Clone this repo. You'll find `README.md`, a `/data` directory, the `license.txt`
 
 I'll go into each of the above as they come up.
 
-I used macOS when writing this tutorial, but most of the instructions should work from any command line. Installing using homebrew won't, though.
+I used macOS when writing this tutorial, but most of the instructions should work from any command line. Installing using homebrew won't, though. Sorry.
 
-## Existing dataset
+## Setting up Postgis
 
-The Bend buildings footprint shapefile comes from the City of Bend. Although they have not yet publicly available on their site, we are hosting it in this repo in the /data directory.
+This tutorial won't [go into detail](https://tilemill-project.github.io/tilemill/docs/guides/postgis-work/) about how to set up Posgres with Postgis, but this should get you going:
 
-We'll be doing most of our geospatial processing using GDAL. I like using [Homebrew](http://brew.sh/) to manage packages on macOS. [NuGet](https://www.nuget.org/) is a nice Windows equivalent, but you'll have to figure out equivalent commands. If you want to build stuff from source, go right ahead, but this tutorial won't cover that.
+First time? Install Postgres:
 
-Install GDAL:
+```
+brew update
+brew install postgresql
+brew services start postgres
+initdb -D /usr/local/var/postgres
+```
+
+You should now have a database cluster. Let's create a database and add the postgis extension:
+
+```
+createdb buildings
+psql -d buildings -c "CREATE EXTENSION postgis;"
+```
+
+You should now have a nice new spatial DB we can add tables to and work with.
+
+## Import buildings shapefile
+
+The Bend buildings footprint shapefile comes from the City of Bend GIS department. A City of Bend GIS staff member is also a member of the Maptime Bend vrew. Although the city has not yet made the dataset publicly available on its website, we are hosting it in this repo in the /data directory in the meantime.
+
+We'll be importing the original dataset into postgis, but first let's take a look at what we're importing.
+
+First, install GDAL:
 
 ```
 brew install gdal
@@ -79,27 +105,176 @@ The fields included in this shapefile suggest that this dateset was originally e
 
 _Before we start creating a bunch of temp data, create a new folder called `data_processing` in the main repo and add it to [your `.gitignore` file](https://help.github.com/articles/ignoring-files/). We'll be filling this folder with lots of (sometimes enormous) scratch files, and we don't really want to track them in github._
 
-Make our processing folder and enter it:
+Make our processing folder:
 
 ```
 mkdir data_processing
 ```
 
-Now lets make that new shapefile:
+Let's create a copy of the shapefile with JUST that `ELEVATION` field, except renamed to something more specific:
 
 ```
-ogr2ogr data_processing/building_footprints.shp data/building_footprints2004_intlfeet.shp -sql "SELECT FID AS id, CAST(elevation AS numeric(10,3)) AS orig_el_ft FROM building_footprints2004_intlfeet" -progress -overwrite
+ogr2ogr data_processing/buildings_orig.shp data/building_footprints2004_intlfeet.shp -sql "SELECT FID AS id, CAST(elevation AS numeric(10,3)) AS orig_el_ft FROM building_footprints2004_intlfeet" -progress -overwrite
 ```
 
-Here's what's happening in that command (I won't break down all of them, just this one since it's kind of a beast):
+Here's what's happening in that command (I won't break down all of them, just this first one since it's kind of a beast):
 
 - `ogr2ogr` This is the GDAL tool that transforms data.
-- `data_processing/building_footprints.shp data/building_footprints2004_intlfeet.shp` ogr2ogr accepts output.shp input.shp as arguments.
+- `data_processing/buildings_orig.shp data/building_footprints2004_intlfeet.shp` ogr2ogr accepts output.shp input.shp as arguments.
 - `-sql` This is a flag that accepts a string of SQL. In this case, we're selecting the `elevation` field from our input and casting it as a numeric value with a width of 10 and a precision of 3, then names it as `orig_el_ft` (original elevation in feet)
 - `-progress` Shows the progress in the terminal, not required
-- `-overwrite` Overwrites the output file if it already exists, not required but nice if you're executing a command multiple
+- `-overwrite` Overwrites the output file if it already exists, not required but nice if you're executing a command multiple times
 
 Now we have a fresh shapefile with just the original elevation in feet for each building footprint.
+
+Now, let's import that shapefile into our database. This is gonna take a couple steps. Start by creating an SQL dump file. This basically converts our shapefile into a long SQL statement that we can import into our database.
+
+```
+shp2pgsql -s 102726 -D data_processing/buildings_orig.shp public.buildings_orig buildings > data_processing/buildings_orig.sql
+
+```
+
+Next, we'll need to add a new spatial reference system to our database, since our dataset uses 102726, which is not generally included in postgis because it is a specific ESRI projection. We can get the INSERT statement from [spatialreference.org](http://spatialreference.org/ref/esri/102726/postgis/).
+
+```
+psql buildings
+
+INSERT into spatial_ref_sys (srid, auth_name, auth_srid, proj4text, srtext) values ( 102726, 'esri', 102726, '+proj=lcc +lat_1=44.33333333333334 +lat_2=46 +lat_0=43.66666666666666 +lon_0=-120.5 +x_0=2500000 +y_0=0 +ellps=GRS80 +datum=NAD83 +to_meter=0.3048006096012192 +no_defs ', 'PROJCS["NAD_1983_StatePlane_Oregon_North_FIPS_3601_Feet",GEOGCS["GCS_North_American_1983",DATUM["North_American_Datum_1983",SPHEROID["GRS_1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["False_Easting",8202083.333333332],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",-120.5],PARAMETER["Standard_Parallel_1",44.33333333333334],PARAMETER["Standard_Parallel_2",46],PARAMETER["Latitude_Of_Origin",43.66666666666666],UNIT["Foot_US",0.30480060960121924],AUTHORITY["EPSG","102726"]]');
+```
+
+_**Note:** If you compare the statement above to the original from spatialreference.org, you'll notice that the srid value is slightly different. My database did not like the extra 9 in front of the SRID, which SR added for some reason. Removing it allows the new SRID to be added, and shouldn't affect our calculations._
+
+Now we should be able to import our dataset into our database:
+
+```
+psql -d buildings -f data_processing/buildings_orig.sql
+```
+
+## Add building addresses
+
+[Deschutes County's Open Data Portal](http://data.deschutes.org/) offers an up-to-date dataset of [all taxlots](http://data.deschutes.org/datasets/28019431cced49849cb4b1793b075bf1_2) in Bend. The portal also offers an up-to-date [data file of addresses](http://data.deschutes.org/datasets/aea94004ae8c49e6a6dec394522677ad_1) for each taxlot.
+
+We'll download both files, join them based on taxlot ID, and then perform a spatial join to attach address information to buildings based on their taxlot. Fun!
+
+First, download and convert the taxlots dataset to an SQL file:
+
+```
+ogr2ogr --config PG_USE_COPY YES -f "PGDump" data_processing/taxlots.sql "http://data.deschutes.org/datasets/28019431cced49849cb4b1793b075bf1_2.geojson" -lco SRID=3857 SCHEMA='public.taxlots'
+```
+
+Then the assessor info table: (This will not have a geometry field, but we'll want an index for our later join.)
+
+```
+ogr2ogr --config PG_USE_COPY YES -f "PGDump" data_processing/addresses.sql "http://data.deschutes.org/datasets/aea94004ae8c49e6a6dec394522677ad_1.geojson" -lco SRID=3857 SCHEMA='addresses'
+```
+
+Now let's go ahead and create indexes on the both datasets:
+
+```
+ogrinfo data_processing/taxlots.shp -sql "CREATE INDEX ON taxlots USING taxlot"
+ogrinfo data_processing/addresses.dbf -sql "CREATE INDEX ON addresses USING taxlot"
+```
+
+Now to join them (this one takes a while):
+
+<!-- Could reduce this dataset to only taxlots in Bend before? -->
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/taxlots_addresses_joined.shp data_processing/taxlots.shp -dialect sqlite -sql "SELECT * FROM taxlots a LEFT JOIN 'data_processing/addresses.dbf'.addresses b ON a.taxlot = b.taxlot" -overwrite -progress
+```
+
+Now let's add spatial indexes to our taxlots and buildings:
+
+```
+ogrinfo data_processing/taxlots_addresses_joined.shp -sql "CREATE SPATIAL INDEX ON taxlots_addresses_joined"
+ogrinfo data_processing/building_el_join.shp -sql "CREATE SPATIAL INDEX ON building_el_join"
+```
+
+Our joined taxlots shapefile has the following fields:
+
+```
+OBJECTID: Integer (10.0)
+TAXLOT: String (80.0)
+TOWNSHIP: String (80.0)
+RANGE: String (80.0)
+SECTION: String (80.0)
+QUARTER: String (80.0)
+SIXTEENTH: String (80.0)
+PARCEL: String (80.0)
+MAPSUP: String (80.0)
+MAPNUMBER: String (80.0)
+Shape_Leng: Real (24.15)
+Shape_Area: Real (24.15)
+Address: String (80.0)
+House_Numb: String (80.0)
+Direction: String (80.0)
+Street_Nam: String (80.0)
+Street_Typ: String (80.0)
+Unit_Numbe: String (80.0)
+City: String (80.0)
+State: String (80.0)
+Zip: String (80.0)
+Subdiv_Cod: String (80.0)
+Subdivisio: String (136.0)
+Block: String (80.0)
+Lot: String (80.0)
+MA: String (80.0)
+SA: String (80.0)
+Percent_Go: String (80.0)
+LegalLot: String (80.0)
+UGB: String (80.0)
+FirePatrol: String (80.0)
+NH: String (80.0)
+```
+
+We only need to join three fields to our buildings shapefile: `House_Numb`, `Street_Nam` and `Street_Typ`. <!-- Do we need unit number? -->
+
+And now the spatial join to attach those fields to all of our buildings using the [ST_Contains query](http://postgis.net/docs/manual-1.4/ST_Contains.html):
+
+<!-- Crap, did I make sure these were in the same coordinate system? Needs to be geographic. -->
+
+
+```
+ogr2ogr -f "ESRI Shapefile" data_processing/buildings_height_addressed.shp data_processing/building_el_join.shp -dialect sqlite -sql "SELECT b.Geometry, b.id, t.House_Numb, t.Street_Nam, t.Street_Typ, b.height FROM building_el_join b, 'data_processing/taxlots_addresses_joined.shp'.taxlots_addresses_joined t WHERE ST_Contains(t.Geometry, b.Geometry)"
+```
+Create centroids from building polygons with just the fields we need:
+
+```
+CREATE TABLE buildings_centroids AS
+	SELECT b.id AS id,
+		b.height AS height,
+		ST_Centroid(b.geom) AS centroid
+	FROM building_el_join b
+```
+
+Join the address to the centroids IF the centroid falls WITHIN a taxlot:
+
+```
+CREATE TABLE buildings_centroids_join AS
+	SELECT b.id AS id,
+        b.height AS height,
+        t.house_numb AS housenumber,
+        t.street_nam AS street,
+        t.city AS city,
+        t.zip AS postcode
+    FROM buildings_centroids b, taxlots_addresses_joined_4326 t
+    WHERE ST_Within(b.centroid, t.geom)
+```
+
+Now join the address from the centroids back to the building polygon based on the id field:
+
+```
+CREATE TABLE buildings_final AS
+	SELECT b.id AS id,
+		b.height AS height,
+		b.housenumber AS housenumber,
+		b.street AS street,
+		b.city AS city,
+		b.postcode AS postcode,
+		p.geom AS geom
+	FROM buildings_centroids_join b, building_el_join p
+	WHERE b.id = p.id
+```
 
 ## Adding building heights
 
@@ -191,7 +366,7 @@ That gives us a shapefile that is essentially a list of the LIDAR data we'll nee
 Finally, let's convert that into a `.csv` file that Wget can iterate over.
 
 ```
-ogr2ogr -f "CSV" data_processing/lidar_urls.csv data_processing/lidar_index_subset.shp -sql "SELECT url FROM lidar_index_subset"
+ogr2ogr -f "CSV" data_processing/lidar_urls.csv data_processing/tileindex_subset.shp -sql "SELECT REPLACE([url], '\"') AS url FROM lidar_index_subset"
 ```
 
 Let's confirm:
@@ -420,132 +595,6 @@ python -m SimpleHTTPServer 8000
 Now open a browser and navigate to http://localhost:8000.
 
 
-## Building addresses
-
-[Deschutes County's Open Data Portal](http://data.deschutes.org/) offers an up-to-date dataset of [all taxlots](http://data.deschutes.org/datasets/28019431cced49849cb4b1793b075bf1_2) in Bend. The portal also offers an up-to-date [data file of addresses](http://data.deschutes.org/datasets/aea94004ae8c49e6a6dec394522677ad_1) for each taxlot.
-
-We'll download both files, join them based on taxlot ID, and then perform a spatial join to attach address information to buildings based on their taxlot. Fun!
-
-First the taxlots dataset:
-
-```
-ogr2ogr -f "ESRI Shapefile" data_processing/taxlots.shp "http://data.deschutes.org/datasets/28019431cced49849cb4b1793b075bf1_2.geojson" OGRGeoJSON
-```
-
-Then the assessor info table: (This will not have a geometry field, but we'll want an index for our later join.)
-
-```
-ogr2ogr -f "ESRI Shapefile" data_processing/addresses.dbf "http://data.deschutes.org/datasets/aea94004ae8c49e6a6dec394522677ad_1.geojson" OGRGeoJSON
-```
-
-Now let's go ahead and create indexes on the both datasets:
-
-```
-ogrinfo data_processing/taxlots.shp -sql "CREATE INDEX ON taxlots USING taxlot"
-ogrinfo data_processing/addresses.dbf -sql "CREATE INDEX ON addresses USING taxlot"
-```
-
-Now to join them (this one takes a while):
-
-<!-- Could reduce this dataset to only taxlots in Bend before? -->
-
-```
-ogr2ogr -f "ESRI Shapefile" data_processing/taxlots_addresses_joined.shp data_processing/taxlots.shp -dialect sqlite -sql "SELECT * FROM taxlots a LEFT JOIN 'data_processing/addresses.dbf'.addresses b ON a.taxlot = b.taxlot" -overwrite -progress
-```
-
-Now let's add spatial indexes to our taxlots and buildings:
-
-```
-ogrinfo data_processing/taxlots_addresses_joined.shp -sql "CREATE SPATIAL INDEX ON taxlots_addresses_joined"
-ogrinfo data_processing/building_el_join.shp -sql "CREATE SPATIAL INDEX ON building_el_join"
-```
-
-Our joined taxlots shapefile has the following fields:
-
-```
-OBJECTID: Integer (10.0)
-TAXLOT: String (80.0)
-TOWNSHIP: String (80.0)
-RANGE: String (80.0)
-SECTION: String (80.0)
-QUARTER: String (80.0)
-SIXTEENTH: String (80.0)
-PARCEL: String (80.0)
-MAPSUP: String (80.0)
-MAPNUMBER: String (80.0)
-Shape_Leng: Real (24.15)
-Shape_Area: Real (24.15)
-Address: String (80.0)
-House_Numb: String (80.0)
-Direction: String (80.0)
-Street_Nam: String (80.0)
-Street_Typ: String (80.0)
-Unit_Numbe: String (80.0)
-City: String (80.0)
-State: String (80.0)
-Zip: String (80.0)
-Subdiv_Cod: String (80.0)
-Subdivisio: String (136.0)
-Block: String (80.0)
-Lot: String (80.0)
-MA: String (80.0)
-SA: String (80.0)
-Percent_Go: String (80.0)
-LegalLot: String (80.0)
-UGB: String (80.0)
-FirePatrol: String (80.0)
-NH: String (80.0)
-```
-
-We only need to join three fields to our buildings shapefile: `House_Numb`, `Street_Nam` and `Street_Typ`. <!-- Do we need unit number? -->
-
-And now the spatial join to attach those fields to all of our buildings using the [ST_Contains query](http://postgis.net/docs/manual-1.4/ST_Contains.html):
-
-<!-- Crap, did I make sure these were in the same coordinate system? Needs to be geographic. -->
-
-!!! NEED TO SET UP AND LOAD POSTGIS HERE MAYBE? !!!
-
-```
-ogr2ogr -f "ESRI Shapefile" data_processing/buildings_height_addressed.shp data_processing/building_el_join.shp -dialect sqlite -sql "SELECT b.Geometry, b.id, t.House_Numb, t.Street_Nam, t.Street_Typ, b.height FROM building_el_join b, 'data_processing/taxlots_addresses_joined.shp'.taxlots_addresses_joined t WHERE ST_Contains(t.Geometry, b.Geometry)"
-```
-Create centroids from building polygons with just the fields we need:
-
-```
-CREATE TABLE buildings_centroids AS
-	SELECT b.id AS id,
-		b.height AS height,
-		ST_Centroid(b.geom) AS centroid
-	FROM building_el_join b
-```
-
-Join the address to the centroids IF the centroid falls WITHIN a taxlot:
-
-```
-CREATE TABLE buildings_centroids_join AS
-	SELECT b.id AS id,
-        b.height AS height,
-        t.house_numb AS housenumber,
-        t.street_nam AS street,
-        t.city AS city,
-        t.zip AS postcode
-    FROM buildings_centroids b, taxlots_addresses_joined_4326 t
-    WHERE ST_Within(b.centroid, t.geom)
-```
-
-Now join the address from the centroids back to the building polygon based on the id field:
-
-```
-CREATE TABLE buildings_final AS
-	SELECT b.id AS id,
-		b.height AS height,
-		b.housenumber AS housenumber,
-		b.street AS street,
-		b.city AS city,
-		b.postcode AS postcode,
-		p.geom AS geom
-	FROM buildings_centroids_join b, building_el_join p
-	WHERE b.id = p.id
-```
 
 Export the buildings as a geojson file for our demo map:
 
