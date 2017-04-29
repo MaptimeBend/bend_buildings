@@ -23,4 +23,4 @@ rm data_processing/temp.json
 rm data_processing/temp_heights.geojson
 
 echo "Exporting demo file"
-ogr2ogr -f GeoJSON demo/buildings_042817.geojson PG:"host=localhost port=5432 dbname=buildings user=postgres" -sql "SELECT id, wkb_geometry, housenumber', street, postcode, height_median AS height FROM buildings" -t_srs http://spatialreference.org/ref/epsg/4326/
+ogr2ogr -f GeoJSON demo/buildings_042817.geojson PG:"host=localhost port=5432 dbname=buildings user=postgres" -sql "SELECT id, wkb_geometry, housenumber, street, postcode, height_median AS height FROM buildings" -t_srs http://spatialreference.org/ref/epsg/4326/
