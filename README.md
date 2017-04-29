@@ -100,7 +100,7 @@ This will use our building footprints table in postgres to extract the median va
 sh process_building_heights.sh
 ```
 
-In addition, this script will export a GeoJSON file to the `demo` folder and an OSM file to the main directory. To view a demo of the data, `cd` to demo and start a web server.
+In addition, this script will export a GeoJSON file to the `demo` folder. To view a demo of the data, `cd` to demo and start a web server.
 
 ## Additional info
 
